@@ -45,7 +45,7 @@ tests/truco.test.js             Tests del motor (node --test)
 
 ```bash
 python .github/scripts/check_site.py   # valida el HTML
-node --test tests/                     # tests del motor
+node --test tests/*.test.js                     # tests del motor
 python -m http.server 8765             # y abrí http://localhost:8765
 ```
 
