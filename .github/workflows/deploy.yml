@@ -1,0 +1,91 @@
+name: Deploy to GitHub Pages
+
+# Flujo completo: valida el sitio, lo empaqueta y lo publica en GitHub Pages.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Un solo despliegue a la vez; no se cancelan los que ya están publicando.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Validate site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check HTML is valid and self-contained
+        run: python3 .github/scripts/check_site.py
+
+  build:
+    name: Build
+    needs: check
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Mensaje claro en lugar del error críptico de la API si Pages no está listo.
+      - name: Check Pages configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cfg=$(gh api "repos/${GITHUB_REPOSITORY}/pages" 2>/dev/null || echo "")
+          if [ -z "$cfg" ]; then
+            echo "::error title=GitHub Pages no está activado::Ve a Settings > Pages > Build and deployment > Source y elige 'GitHub Actions'."
+            exit 1
+          fi
+          build_type=$(printf '%s' "$cfg" | jq -r '.build_type // empty')
+          if [ "$build_type" != "workflow" ]; then
+            echo "::error title=Origen de publicación incorrecto::Cambia Settings > Pages > Source a 'GitHub Actions' (valor actual: ${build_type:-desconocido})."
+            exit 1
+          fi
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          # Todo el repo; la acción excluye .git y .github automáticamente.
+          path: "."
+
+  deploy:
+    name: Deploy
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+      - name: Verify the site responds
+        run: |
+          url="${{ steps.deployment.outputs.page_url }}"
+          for attempt in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$url")
+            if [ "$code" = "200" ]; then
+              echo "OK: $url responde 200"
+              exit 0
+            fi
+            echo "Intento $attempt: HTTP $code, reintentando en 10 s..."
+            sleep 10
+          done
+          echo "::warning::El despliegue terminó, pero $url aún responde $code. La propagación puede tardar unos minutos."
