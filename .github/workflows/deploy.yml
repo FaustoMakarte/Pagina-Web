@@ -29,6 +29,9 @@ jobs:
       - name: Check HTML is valid and self-contained
         run: python3 .github/scripts/check_site.py
 
+      - name: Run game engine tests
+        run: node --test tests/
+
   build:
     name: Build
     needs: check
